@@ -9,6 +9,7 @@
 import Combine
 import Foundation
 
+@MainActor
 final class URLSynchronizer: ObservableObject {
     static let shared = URLSynchronizer()
 
@@ -17,8 +18,6 @@ final class URLSynchronizer: ObservableObject {
     private init() {}
 
     func updateCurrentURL(_ url: URL?) {
-        DispatchQueue.main.async {
-            self.currentURL = url
-        }
+        currentURL = url
     }
 }

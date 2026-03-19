@@ -25,35 +25,39 @@ struct TabDisplayView: View {
     var body: some View {
         ZStack(alignment: .topLeading) {
             VStack(spacing: 0) {
-                HStack(spacing: 0) {
-                TrafficLightsView()
-                    .padding(.leading, 4)
-                
-                Spacer()
-                
-                if let activeTab = tabManager.activeTab {
-                    NavigationControls(tab: activeTab, showsRefreshButton: true)
-                } else {
-                    HStack(spacing: 4) {
-                        Image(systemName: "chevron.left").opacity(0.2)
-                        Image(systemName: "chevron.right").opacity(0.2)
-                        Image(systemName: "arrow.clockwise").opacity(0.2)
+                VStack(spacing: 0) {
+                    HStack(spacing: 0) {
+                        TrafficLightsView()
+                            .padding(.leading, 4)
+                        
+                        Spacer()
+                        
+                        if let activeTab = tabManager.activeTab {
+                            NavigationControls(tab: activeTab, showsRefreshButton: true)
+                        } else {
+                            HStack(spacing: 4) {
+                                Image(systemName: "chevron.left").opacity(0.2)
+                                Image(systemName: "chevron.right").opacity(0.2)
+                                Image(systemName: "arrow.clockwise").opacity(0.2)
+                            }
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(Color.textSecondary)
+                        }
                     }
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(Color.textSecondary)
+                    .padding(.top, 16)
+                    .padding(.trailing, 16)
+                    .padding(.bottom, 12)
+                    
+                    URLBar(
+                        activeTab: tabManager.activeTab,
+                        addressText: $viewModel.addressBarText,
+                        onNavigate: viewModel.navigateToAddressBarURL
+                    )
+                    .padding(.bottom, 12)
                 }
-            }
-            .padding(.top, 16)
-            .padding(.trailing, 16)
-            .padding(.bottom, 12)
-            URLBar(
-                activeTab: tabManager.activeTab,
-                addressText: $viewModel.addressBarText,
-                onNavigate: viewModel.navigateToAddressBarURL
-            )
-            .padding(.bottom, 12)
+                .background(DraggableArea())
 
-            CavedDivider()
+                CavedDivider()
             ScrollView(.vertical, showsIndicators: false) {
                 tabsListContent
                     .padding(.vertical, 10)

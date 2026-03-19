@@ -450,6 +450,7 @@ struct SettingsView: View {
                 shortcutRow(label: "Focus URL Bar", keys: "⌘ L")
                 shortcutRow(label: "Refresh Page", keys: "⌘ R")
                 shortcutRow(label: "Find in Page", keys: "⌘ F")
+                shortcutRow(label: "Toggle Full Screen", keys: "⌘ ⇧ F")
                 shortcutRow(label: "Toggle Sidebar", keys: "⌘ S")
                 shortcutRow(label: "Zoom In", keys: "⌘ +")
                 shortcutRow(label: "Zoom Out", keys: "⌘ -")

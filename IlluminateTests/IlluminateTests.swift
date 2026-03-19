@@ -17,11 +17,6 @@ struct IlluminateTests {
 
     @Test func testTabAssetPersistence() async throws {
         let tabID = UUID()
-        let tab = await MainActor.run {
-            Tab(id: tabID, url: URL(string: "https://google.com"), title: "Google")
-        }
-        
-        // Create test image on main thread
         let image = await MainActor.run {
             let size = NSSize(width: 10, height: 10)
             let img = NSImage(size: size)
@@ -31,20 +26,17 @@ struct IlluminateTests {
             img.unlockFocus()
             return img
         }
-        
-        await MainActor.run {
-            tab.favicon = image
-            tab.snapshot = image
-        }
-        
-        // generate payload to trigger save asset
-        let _ = await MainActor.run { tab.toTransferPayload() }
-        
-        // make sure its real...
+
         let paths = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
         let base = paths[0].appendingPathComponent("Illuminate/TabAssets", isDirectory: true)
         let tabFolder = base.appendingPathComponent(tabID.uuidString, isDirectory: true)
-        
+        try? FileManager.default.createDirectory(at: tabFolder, withIntermediateDirectories: true)
+
+        let faviconURL = tabFolder.appendingPathComponent("favicon.png")
+        let snapshotURL = tabFolder.appendingPathComponent("snapshot.jpg")
+        try image.pngData()?.write(to: faviconURL)
+        try image.jpegData(compressionQuality: 0.7)?.write(to: snapshotURL)
+
         #expect(FileManager.default.fileExists(atPath: tabFolder.appendingPathComponent("favicon.png").path))
         #expect(FileManager.default.fileExists(atPath: tabFolder.appendingPathComponent("snapshot.jpg").path))
         

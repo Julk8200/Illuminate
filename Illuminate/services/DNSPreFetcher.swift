@@ -13,7 +13,9 @@ import Darwin
 final class DNSPreFetcher {
     static let shared = DNSPreFetcher()
     
-    private let queue = DispatchQueue(label: "illuminate.dns.prefetch", qos: .utility)
+    private var inFlightHosts = Set<String>()
+    private var lastResolvedAt: [String: Date] = [:]
+    private let cooldown: TimeInterval = 120
     
     private init() {}
     
@@ -54,22 +56,33 @@ final class DNSPreFetcher {
             }
         }
     }
+
+    func prefetchHost(_ host: String) {
+        let normalized = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalized.isEmpty else { return }
+
+        let now = Date()
+        if let lastResolved = lastResolvedAt[normalized], now.timeIntervalSince(lastResolved) < cooldown {
+            return
+        }
+        guard inFlightHosts.insert(normalized).inserted else { return }
+
+        Task.detached(priority: .background) { [normalized] in
+            Self.resolve(host: normalized)
+            await DNSPreFetcher.shared.markPrefetchComplete(for: normalized)
+        }
+    }
     
     private func resolveHosts(_ hosts: [String]) async {
         let uniqueHosts = Array(Set(hosts))
-        
-        // Parallelize resolution using TaskGroup
-        await withTaskGroup(of: Void.self) { group in
-            for host in uniqueHosts {
-                group.addTask(priority: .background) {
-                    self.resolve(host: host)
-                }
-            }
+
+        for host in uniqueHosts {
+            prefetchHost(host)
         }
     }
     
     // doesnt need to be run on the main actor
-    nonisolated private func resolve(host: String) {
+    nonisolated private static func resolve(host: String) {
         var hints = addrinfo(
             ai_flags: AI_DEFAULT,
             ai_family: AF_UNSPEC,
@@ -87,5 +100,9 @@ final class DNSPreFetcher {
             freeaddrinfo(res)
         }
     }
-}
 
+    private func markPrefetchComplete(for host: String) {
+        lastResolvedAt[host] = Date()
+        inFlightHosts.remove(host)
+    }
+}

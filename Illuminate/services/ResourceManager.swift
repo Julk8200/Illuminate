@@ -49,8 +49,12 @@ final class ResourceManager: ObservableObject {
     private enum Policy {
         static let minTabsForHibernation = 5
         static let recentActivationWindow: TimeInterval = 60
+        static let lightInactivityWindow: TimeInterval = 90
+        static let mediumInactivityWindow: TimeInterval = 300
+        static let fullInactivityWindow: TimeInterval = 900
         static let backgroundSampleInterval: TimeInterval = 60
-        static let freezeThresholdRatio: Double = 0.6
+        static let lightThresholdRatio: Double = 0.45
+        static let mediumThresholdRatio: Double = 0.75
     }
 
     static let shared = ResourceManager()
@@ -100,6 +104,7 @@ final class ResourceManager: ObservableObject {
         let pid: Int32
         let title: String
         let lastActivatedAt: Date
+        let lastAccessed: Date
         let isFrozen: Bool
         let isActive: Bool
     }
@@ -108,9 +113,12 @@ final class ResourceManager: ObservableObject {
         let tabs = tabManager.tabs
         let activeTabID = tabManager.activeTabID
         let now = Date()
+        let hibernatedTabIDs = tabs.compactMap { tab -> UUID? in
+            guard tab.isHibernated, tab.memoryUsage != 0 else { return nil }
+            return tab.id
+        }
         let specs: [TabCheckSpec] = tabs.compactMap { tab in
             if tab.isHibernated {
-                tab.memoryUsage = 0
                 return nil
             }
             guard tab.webView != nil else { return nil }
@@ -124,9 +132,16 @@ final class ResourceManager: ObservableObject {
                 pid: tab.processIdentifier,
                 title: tab.title,
                 lastActivatedAt: tab.lastActivatedAt,
+                lastAccessed: tab.lastAccessed,
                 isFrozen: tab.isFrozen,
                 isActive: isActive
             )
+        }
+
+        if !hibernatedTabIDs.isEmpty {
+            Task { @MainActor [weak self] in
+                self?.resetMemoryUsage(for: hibernatedTabIDs)
+            }
         }
 
         guard !specs.isEmpty else { return }
@@ -148,13 +163,15 @@ final class ResourceManager: ObservableObject {
     private func apply(samples: [(id: UUID, bytes: UInt64)], specs: [TabCheckSpec], sampledAt: Date) {
         let activeTabID = tabManager.activeTabID
         let totalTabs = tabManager.tabs.count
-        let hibernateBytes = memoryThresholdMB * 1024 * 1024
-        let freezeBytes = UInt64(Double(hibernateBytes) * Policy.freezeThresholdRatio)
+        let fullBytes = memoryThresholdMB * 1024 * 1024
+        let mediumBytes = UInt64(Double(fullBytes) * Policy.mediumThresholdRatio)
+        let lightBytes = UInt64(Double(fullBytes) * Policy.lightThresholdRatio)
 
         for (id, bytes) in samples {
             lastCheckTimes[id] = sampledAt
 
             guard let tab = tabManager.tabs.first(where: { $0.id == id }) else { continue }
+            guard let spec = specs.first(where: { $0.id == id }) else { continue }
             tab.memoryUsage = bytes
 
             guard
@@ -164,13 +181,39 @@ final class ResourceManager: ObservableObject {
                 !tab.recentlyActivated(within: Policy.recentActivationWindow)
             else { continue }
 
-            if bytes > hibernateBytes {
-                AppLog.info("Hibernating '\(tab.title)' (\(bytes.toMB)MB)")
-                tab.hibernate(shouldSnapshot: false)
-            } else if bytes > freezeBytes, !tab.isFrozen, !tab.isHibernated {
-                AppLog.info("Freezing '\(tab.title)' (\(bytes.toMB)MB)")
-                tab.freeze()
+            let inactivity = sampledAt.timeIntervalSince(spec.lastAccessed)
+            let targetTier: TabDiscardTier?
+
+            if bytes > fullBytes && inactivity >= Policy.fullInactivityWindow {
+                targetTier = .full
+            } else if bytes > mediumBytes && inactivity >= Policy.mediumInactivityWindow {
+                targetTier = .medium
+            } else if bytes > lightBytes && inactivity >= Policy.lightInactivityWindow {
+                targetTier = .light
+            } else {
+                targetTier = nil
             }
+
+            guard let targetTier, targetTier.rawValue > tab.discardTier.rawValue else { continue }
+            AppLog.info("Discarding '\(tab.title)' at \(targetTier) tier (\(bytes.toMB)MB)")
+            tab.applyDiscardTier(targetTier)
+        }
+    }
+
+    private func resetMemoryUsage(for ids: [UUID]) {
+        guard !ids.isEmpty else { return }
+
+        for id in ids {
+            guard let tab = tabManager.tabs.first(where: { $0.id == id }) else { continue }
+            tab.memoryUsage = 0
+        }
+    }
+
+    private func applyPressureDiscardTier(_ tier: TabDiscardTier, to tabs: ArraySlice<Tab>) {
+        for tab in tabs {
+            guard tier.rawValue > tab.discardTier.rawValue else { continue }
+            AppLog.info("Memory pressure escalated '\(tab.title)' to \(tier) tier")
+            tab.applyDiscardTier(tier)
         }
     }
 
@@ -193,15 +236,14 @@ final class ResourceManager: ObservableObject {
 
         guard !candidates.isEmpty else { return }
 
-        let (count, snapshotAllowed): (Int, Bool)
         switch event {
-        case .warning:  (count, snapshotAllowed) = (max(1, candidates.count / 3), true)
-        case .critical: (count, snapshotAllowed) = (candidates.count,             false)
+        case .warning:
+            let count = max(1, candidates.count / 3)
+            applyPressureDiscardTier(.medium, to: candidates.prefix(count))
+        case .critical:
+            applyPressureDiscardTier(.full, to: candidates[...])
         default: return
         }
-
-        AppLog.info("Memory pressure .\(event.label); suspending \(count) background tab(s)")
-        candidates.prefix(count).forEach { $0.suspend(allowSnapshot: snapshotAllowed) }
     }
 
     func resetForTesting() {

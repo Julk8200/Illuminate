@@ -20,6 +20,13 @@ struct TabState: Codable, Sendable {
     var capturedAt: Date
 }
 
+enum TabDiscardTier: Int, Codable, Sendable {
+    case active = 0
+    case light = 1
+    case medium = 2
+    case full = 3
+}
+
 struct TabTransferPayload: Codable, Sendable {
     var id: UUID
     var url: URL?

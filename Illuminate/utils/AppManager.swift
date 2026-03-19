@@ -26,4 +26,5 @@ extension Notification.Name {
     static let zoomOut = Notification.Name("app.zoomOut")
     static let resetZoom = Notification.Name("app.resetZoom")
     static let zoomChanged = Notification.Name("app.zoomChanged")
+    static let toggleFullScreen = Notification.Name("app.toggleFullScreen")
 }

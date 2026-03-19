@@ -20,13 +20,19 @@ struct AdBlockTests {
 
     @Test func testContentRuleListCreation() async throws {
         let adBlock = AdBlockService(userDefaults: createTestUserDefaults())
-        try await Task.sleep(nanoseconds: 500_000_000)
+        
+        // Give it more time for potentially large EasyList parsing and compilation
+        var attempts = 0
+        while adBlock.contentRuleList == nil && attempts < 10 {
+            try await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
+            attempts += 1
+        }
         
         #expect(adBlock.isEnabled == true, "AdBlock should be enabled by default")
-        #expect(adBlock.contentRuleList != nil, "Content rule list should be created when enabled")
+        #expect(adBlock.contentRuleList != nil, "Content rule list should be created when enabled after \(attempts) seconds")
     }
 
-    @Test func testEnabledToggle() async throws {
+    @Test func testToggleAdBlock() async throws {
         let userDefaults = createTestUserDefaults()
         userDefaults.set(false, forKey: "adBlockEnabled")
         
@@ -36,24 +42,34 @@ struct AdBlockTests {
         
         // Enable
         adBlock.isEnabled = true
-        try await Task.sleep(nanoseconds: 500_000_000)
+        
+        var attempts = 0
+        while adBlock.contentRuleList == nil && attempts < 10 {
+            try await Task.sleep(nanoseconds: 1_000_000_000)
+            attempts += 1
+        }
+        
         #expect(adBlock.contentRuleList != nil, "Content rule list should be created when enabled")
         
         // Disable
         adBlock.isEnabled = false
-        try await Task.sleep(nanoseconds: 100_000_000)
+        try await Task.sleep(nanoseconds: 500_000_000)
         #expect(adBlock.contentRuleList == nil, "Content rule list should be nil when disabled")
     }
 
     @Test func testAllowlist() async throws {
         let adBlock = AdBlockService(userDefaults: createTestUserDefaults())
         
-        try await Task.sleep(nanoseconds: 500_000_000)
+        var attempts = 0
+        while adBlock.contentRuleList == nil && attempts < 10 {
+            try await Task.sleep(nanoseconds: 1_000_000_000)
+            attempts += 1
+        }
         
         #expect(adBlock.contentRuleList != nil, "Content rule list should exist")
         
         adBlock.addAllowlistHost("doubleclick.net")
-        try await Task.sleep(nanoseconds: 500_000_000)
+        try await Task.sleep(nanoseconds: 1_000_000_000)
         
         #expect(adBlock.contentRuleList != nil, "Content rule list should still exist after allowlist update")
     }

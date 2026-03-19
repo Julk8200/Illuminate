@@ -33,7 +33,7 @@ final class TabHibernationManager {
 
         let tabsToHibernate = max(0, liveTabs.count - maxLiveTabs)
         for tab in candidates.prefix(tabsToHibernate) {
-            tab.hibernate()
+            tab.applyDiscardTier(.full)
             AppLog.info("Hibernated tab: \(tab.id.uuidString)")
         }
     }

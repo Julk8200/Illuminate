@@ -1,6 +1,8 @@
 # Created by https://www.toptal.com/developers/gitignore/api/xcode,swift
 # Edit at https://www.toptal.com/developers/gitignore?templates=xcode,swift
 
+# so this just doesnt get seen?
+.deriveddata
 ### Swift ###
 # Xcode
 #

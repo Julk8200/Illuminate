@@ -11,7 +11,8 @@ import WebKit
 
 final class AdBlockService: ObservableObject {
 
-    static let shared = AdBlockService()
+    private static let sharedRuleListIdentifier = "IlluminateAdBlockRules"
+    static let shared = AdBlockService(ruleListIdentifier: sharedRuleListIdentifier)
     
     @Published var isEnabled: Bool = true {
         didSet {
@@ -26,14 +27,21 @@ final class AdBlockService: ObservableObject {
     private var blockedURLKeywords: Set<String> = []
     private var allowlistedHosts: Set<String> = []
     private let userDefaults: UserDefaults
+    private let ruleListIdentifier: String
 
-    init(userDefaults: UserDefaults = .standard) {
+    init(
+        userDefaults: UserDefaults = .standard,
+        ruleListIdentifier: String = "IlluminateAdBlockRules-\(UUID().uuidString)"
+    ) {
         self.userDefaults = userDefaults
-        self.isEnabled = userDefaults.object(forKey: "adBlockEnabled") as? Bool ?? true
+        self.ruleListIdentifier = ruleListIdentifier
+        let storedEnabled = userDefaults.object(forKey: "adBlockEnabled") as? Bool ?? true
+        self.isEnabled = storedEnabled
         loadDefaultRules()
         
-        if isEnabled {
-            WKContentRuleListStore.default().lookUpContentRuleList(forIdentifier: "IlluminateAdBlockRules") { [weak self] list, _ in
+        if storedEnabled {
+            // Initial compilation if not found
+            WKContentRuleListStore.default().lookUpContentRuleList(forIdentifier: ruleListIdentifier) { [weak self] list, _ in
                 if let list = list {
                     DispatchQueue.main.async {
                         self?.contentRuleList = list
@@ -55,13 +63,14 @@ final class AdBlockService: ObservableObject {
 
         let rules = generateRulesJSON()
         
-        WKContentRuleListStore.default().compileContentRuleList(forIdentifier: "IlluminateAdBlockRules", encodedContentRuleList: rules) { [weak self] (list: WKContentRuleList?, error: Error?) in
+        WKContentRuleListStore.default().compileContentRuleList(forIdentifier: ruleListIdentifier, encodedContentRuleList: rules) { [weak self] (list: WKContentRuleList?, error: Error?) in
             if let error = error {
-                print("Failed to compile adblock rules: \(error.localizedDescription)")
+                print("AdBlockService: Failed to compile rules: \(error)")
                 return
             }
             
             if let contentList = list {
+                print("AdBlockService: Successfully compiled rules")
                 DispatchQueue.main.async {
                     self?.contentRuleList = contentList
                 }
@@ -69,26 +78,37 @@ final class AdBlockService: ObservableObject {
         }
     }
 
+    private var cachedBundledRules: [[String: Any]]?
+
     private func generateRulesJSON() -> String {
         var rulesArray: [[String: Any]] = []
+        if let cached = cachedBundledRules {
+            rulesArray.append(contentsOf: cached)
+        } else if let bundlePath = Bundle(for: AdBlockService.self).path(forResource: "EasyList", ofType: "txt") ?? Bundle.main.path(forResource: "EasyList", ofType: "txt"),
+           let content = try? String(contentsOfFile: bundlePath, encoding: .utf8) {
+            let parsedJSON = EasyListParser.parse(content: content)
+            if let data = parsedJSON.data(using: .utf8),
+               let parsedRules = try? JSONSerialization.jsonObject(with: data, options: []) as? [[String: Any]] {
+                cachedBundledRules = parsedRules
+                rulesArray.append(contentsOf: parsedRules)
+            }
+        }
         for host in allowlistedHosts {
-            let escapedHost = host.replacingOccurrences(of: ".", with: "\\.")
-            rulesArray.append([
+            rulesArray.insert([
                 "trigger": [
-                    "url-filter": ".*\(escapedHost).*",
+                    "url-filter": ".*\(host.replacingOccurrences(of: ".", with: "\\.")).*",
                     "url-filter-is-case-sensitive": false
                 ],
                 "action": [
                     "type": "ignore-previous-rules"
                 ]
-            ])
+            ], at: 0)
         }
 
         for host in blockedHosts {
-            let escapedHost = host.replacingOccurrences(of: ".", with: "\\.")
             rulesArray.append([
                 "trigger": [
-                    "url-filter": ".*\(escapedHost).*",
+                    "url-filter": ".*\(host.replacingOccurrences(of: ".", with: "\\.")).*",
                     "url-filter-is-case-sensitive": false
                 ],
                 "action": [
@@ -98,10 +118,9 @@ final class AdBlockService: ObservableObject {
         }
 
         for keyword in blockedURLKeywords {
-            let escapedKeyword = NSRegularExpression.escapedPattern(for: keyword)
             rulesArray.append([
                 "trigger": [
-                    "url-filter": ".*\(escapedKeyword).*",
+                    "url-filter": ".*\(NSRegularExpression.escapedPattern(for: keyword)).*",
                     "url-filter-is-case-sensitive": false
                 ],
                 "action": [
@@ -110,12 +129,19 @@ final class AdBlockService: ObservableObject {
             ])
         }
 
-        // always include one rule
-        // otherwise it gets angryyy
-        rulesArray.append([
-            "trigger": ["url-filter": "https://illuminate-internal-dummy-rule-to-prevent-error-6.com"],
-            "action": ["type": "block"]
-        ])
+        let hasBlockingRule = rulesArray.contains { rule in
+            let action = rule["action"] as? [String: Any]
+            let type = action?["type"] as? String
+            return type != nil && type != "ignore-previous-rules"
+        }
+
+        // WebKit rejects rule lists that only contain allowlist entries.
+        if !hasBlockingRule {
+            rulesArray.append([
+                "trigger": ["url-filter": "https://illuminate-internal-dummy-rule-to-prevent-error-6.com"],
+                "action": ["type": "block"]
+            ])
+        }
 
         if let data = try? JSONSerialization.data(withJSONObject: rulesArray, options: []),
            let json = String(data: data, encoding: .utf8) {
@@ -126,25 +152,6 @@ final class AdBlockService: ObservableObject {
     }
 
     private func loadDefaultRules() {
-        blockedHosts = [
-            "doubleclick.net",
-            "googlesyndication.com",
-            "googleadservices.com",
-            "ads.yahoo.com",
-            "adservice.google.com",
-            "ads-twitter.com",
-            "facebook.com",
-            "adnxs.com"
-        ]
-
-        blockedURLKeywords = [
-            "/ads/",
-            "banner",
-            "advert",
-            "tracking",
-            "analytics"
-        ]
-
         allowlistedHosts = ["browserbench.org"]
     }
 

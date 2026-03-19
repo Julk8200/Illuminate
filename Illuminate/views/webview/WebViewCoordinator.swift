@@ -19,6 +19,7 @@ extension WebViewRepresentable {
         private let dohService: DNSOverHTTPSService
         private let safeBrowsing: SafeBrowsingManager
         private let faviconCache: FaviconCache
+        private let preconnectManager = NavigationPreconnectManager.shared
 
         private let circuitBreaker = WebProcessCircuitBreaker()
         private var isRestoringHibernatedState = false
@@ -93,7 +94,7 @@ extension WebViewRepresentable {
             }
 
             if let title = state.title { tab.title = title }
-            tab.isHibernated = false
+            tab.markRestoredFromDiscard()
         }
 
         func userContentController(
@@ -124,6 +125,9 @@ extension WebViewRepresentable {
                 if let hoverURL = body["hoverURL"] as? String {
                     let newValue: String? = hoverURL.isEmpty ? nil : hoverURL
                     if tab.hoveredLinkURLString != newValue { tab.hoveredLinkURLString = newValue }
+                    if let newValue, let url = URL(string: newValue) {
+                        self.preconnectManager.preconnect(to: url, in: message.webView)
+                    }
                     return
                 }
                 if body["hoverURL"] is NSNull {
@@ -139,7 +143,10 @@ extension WebViewRepresentable {
                     if tab.themeColor != newColor { tab.themeColor = newColor }
                 }
                 if let faviconString = body["favicon"] as? String,
-                   let faviconURL = URL(string: faviconString) {
+                   let faviconURL = self.resolveFaviconURL(
+                    from: faviconString,
+                    pageURL: message.webView?.url
+                   ) {
                     Task { await self.loadFavicon(from: faviconURL, for: tab) }
                 }
             }
@@ -448,19 +455,32 @@ extension WebViewRepresentable {
             lastAppliedContentRuleList = ruleList
         }
 
-        private func loadFavicon(from url: URL, for tab: Tab) async {
-            if let cached = faviconCache.image(for: url) {
-                await MainActor.run { tab.favicon = cached }
-                return
+        private func resolveFaviconURL(from rawValue: String, pageURL: URL?) -> URL? {
+            let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return nil }
+
+            let resolvedURL: URL?
+            if trimmed.hasPrefix("data:") {
+                resolvedURL = URL(string: trimmed)
+            } else if let pageURL {
+                resolvedURL = URL(string: trimmed, relativeTo: pageURL)?.absoluteURL
+            } else {
+                resolvedURL = URL(string: trimmed)
             }
-            do {
-                let (data, _) = try await URLSession.shared.data(from: url)
-                if let image = NSImage(data: data) {
-                    faviconCache.set(image, for: url)
-                    await MainActor.run { tab.favicon = image }
-                }
-            } catch {
-                AppLog.info("Failed to load favicon from \(url): \(error.localizedDescription)")
+
+            guard let resolvedURL else { return nil }
+
+            switch resolvedURL.scheme?.lowercased() {
+            case "http", "https", "data":
+                return resolvedURL
+            default:
+                return nil
+            }
+        }
+
+        private func loadFavicon(from url: URL, for tab: Tab) async {
+            if let image = await faviconCache.fetchImage(for: url) {
+                await MainActor.run { tab.favicon = image }
             }
         }
 

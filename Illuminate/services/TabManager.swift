@@ -193,9 +193,10 @@ final class TabManager: ObservableObject {
                 activeTabID: self.activeTabID
             )
             let url = self.cachedSessionURL
+            let encodedState = try? JSONEncoder().encode(state)
 
             Task.detached(priority: .background) {
-                if let data = try? JSONEncoder().encode(state) {
+                if let data = encodedState {
                     try? data.write(to: url, options: .atomic)
                 }
             }
@@ -365,7 +366,7 @@ final class TabManager: ObservableObject {
         liveTabs
             .sorted { $0.lastAccessed < $1.lastAccessed }
             .prefix(toSuspend)
-            .forEach { count > SuspensionPolicy.highTabCount ? $0.suspend() : $0.freeze() }
+            .forEach { $0.applyDiscardTier(count > SuspensionPolicy.highTabCount ? .medium : .light) }
     }
 
     private func pushRecentlyClosed(_ payload: TabTransferPayload) {
@@ -419,6 +420,7 @@ final class TabManager: ObservableObject {
             (.zoomIn,             { [weak self] in self?.activeTab?.zoomIn() }),
             (.zoomOut,            { [weak self] in self?.activeTab?.zoomOut() }),
             (.resetZoom,          { [weak self] in self?.activeTab?.resetZoom() }),
+            (.toggleFullScreen,   { NSApp.keyWindow?.toggleFullScreen(nil) }),
             (NSNotification.Name("closeActiveTab"), { [weak self] in self?.closeActiveTab() }),
         ]
 

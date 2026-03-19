@@ -44,6 +44,7 @@ final class Tab: ObservableObject, Identifiable {
     @Published var zoomLevel: Double = 1.0
     @Published var snapshot: NSImage?
     @Published private(set) var hibernatedState: TabState?
+    @Published private(set) var discardTier: TabDiscardTier
     @Published var isFrozen: Bool = false
     @Published var hasPiPCandidate: Bool = false
 
@@ -96,6 +97,7 @@ final class Tab: ObservableObject, Identifiable {
         self.hoveredLinkURLString = hoveredLinkURLString
         self.hibernatedState = hibernatedState
         self.groupID = groupID
+        self.discardTier = isHibernated ? .medium : .active
         self.ownershipToken = id.uuidString
         self.lastActivatedAt = Date()
         self.lastAccessed = Date()
@@ -135,6 +137,8 @@ final class Tab: ObservableObject, Identifiable {
         webView = newWebView
         setupWebViewObservers(newWebView)
         DispatchQueue.main.async { [weak self] in
+            self?.discardTier = .active
+            self?.isFrozen = false
             self?.isHibernated = false
         }
     }
@@ -153,6 +157,8 @@ final class Tab: ObservableObject, Identifiable {
         webView = candidate
         setupWebViewObservers(candidate)
         DispatchQueue.main.async { [weak self] in
+            self?.discardTier = .active
+            self?.isFrozen = false
             self?.isHibernated = false
         }
     }
@@ -192,6 +198,8 @@ final class Tab: ObservableObject, Identifiable {
 
     func suspend(allowSnapshot: Bool = true) {
         guard let webView else {
+            discardTier = .medium
+            isFrozen = false
             isHibernated = true
             return
         }
@@ -203,6 +211,8 @@ final class Tab: ObservableObject, Identifiable {
         webView.stopLoading()
         hibernatedState = captureState()
         detachWebView()
+        discardTier = .medium
+        isFrozen = false
         isHibernated = true
         isLoading = false
     }
@@ -214,6 +224,7 @@ final class Tab: ObservableObject, Identifiable {
         isFrozen = false
         hibernatedState = captureState()
         detachWebView()
+        discardTier = .full
         isHibernated = true
         isLoading = false
     }
@@ -243,6 +254,7 @@ final class Tab: ObservableObject, Identifiable {
             )
             title = state.title ?? title
         }
+        discardTier = .active
         isFrozen = false
     }
 
@@ -266,6 +278,7 @@ final class Tab: ObservableObject, Identifiable {
 
     func freeze() {
         guard let webView, !isHibernated, !isFrozen else { return }
+        discardTier = .light
         isFrozen = true
         webView.stopLoading()
 
@@ -285,7 +298,29 @@ final class Tab: ObservableObject, Identifiable {
 
     func thaw() {
         guard isFrozen else { return }
+        discardTier = .active
         isFrozen = false
+    }
+
+    func markRestoredFromDiscard() {
+        discardTier = .active
+        isFrozen = false
+        isHibernated = false
+    }
+
+    func applyDiscardTier(_ tier: TabDiscardTier) {
+        guard tier.rawValue > discardTier.rawValue else { return }
+
+        switch tier {
+        case .active:
+            return
+        case .light:
+            freeze()
+        case .medium:
+            suspend(allowSnapshot: true)
+        case .full:
+            hibernate(shouldSnapshot: false)
+        }
     }
 
     func togglePictureInPicture() {

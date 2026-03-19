@@ -42,6 +42,7 @@ struct AppCommands: Commands {
             Divider()
 
             BrowserCommand("Find in Page",    shortcut: "f")                          { .findInPage }
+            BrowserCommand("Toggle Full Screen", shortcut: "f", modifiers: [.command, .shift]) { .toggleFullScreen }
             BrowserCommand("Developer Tools", shortcut: "i", modifiers: [.command, .shift]) { .openDevTools }
         }
 

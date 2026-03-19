@@ -40,10 +40,7 @@ struct FaviconCacheTests {
             cache.set(img, for: url)
         }
         
-        // Touch the 1st one so it moves to end
         _ = cache.image(for: urls[0])
-        
-        // 9th should kick the 2nd one (which is now the oldest)
         cache.set(img, for: urls[8])
         
         #expect(cache.image(for: urls[0]) != nil, "urls[0] should still be cached")
@@ -81,7 +78,52 @@ struct FaviconCacheTests {
         let retrieved = newCache.image(for: url)
         
         #expect(retrieved != nil, "Image should persist across cache instances via disk")
-        
+
         try? FileManager.default.removeItem(at: cacheDir)
+    }
+
+    @Test func testConcurrentFetchesAreDeduplicated() async throws {
+        let cacheDir = temporaryCacheDirectory()
+        let url = URL(string: "https://example.com/favicon.ico")!
+        let data = createTestImage().pngData()!
+        let counter = LockedCounter()
+
+        let cache = FaviconCache(
+            capacity: 10,
+            cacheDirectory: cacheDir,
+            fetchData: { _ in
+                counter.increment()
+                try await Task.sleep(nanoseconds: 100_000_000)
+                return data
+            }
+        )
+
+        async let first = cache.fetchImage(for: url)
+        async let second = cache.fetchImage(for: url)
+        let firstResult = await first
+        let secondResult = await second
+
+        #expect(firstResult != nil)
+        #expect(secondResult != nil)
+        #expect(counter.value == 1, "Concurrent favicon fetches should coalesce into one request")
+
+        try? FileManager.default.removeItem(at: cacheDir)
+    }
+}
+
+private final class LockedCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage = 0
+
+    func increment() {
+        lock.lock()
+        storage += 1
+        lock.unlock()
+    }
+
+    var value: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage
     }
 }

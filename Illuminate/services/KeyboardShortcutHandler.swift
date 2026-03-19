@@ -48,6 +48,7 @@ final class KeyboardShortcutHandler {
         // ⌘⇧ + character
         .init(modifiers: [.command, .shift], trigger: .character("i"), action: .openDevTools),
         .init(modifiers: [.command, .shift], trigger: .character("t"), action: .reopenTab),
+        .init(modifiers: [.command, .shift], trigger: .character("f"), action: .toggleFullScreen),
     ]
 
     private let notificationCenter: NotificationCenter
@@ -75,6 +76,7 @@ final class KeyboardShortcutHandler {
     func toggleSidebar() { post(.toggleSidebar) }
     func findInPage() { post(.findInPage) }
     func openDevTools() { post(.openDevTools) }
+    func toggleFullScreen() { post(.toggleFullScreen) }
     func zoomIn() { post(.zoomIn) }
     func zoomOut() { post(.zoomOut) }
     func resetZoom() { post(.resetZoom) }
